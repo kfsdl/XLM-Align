@@ -12,6 +12,7 @@ from fairseq.data.dictionary import Dictionary
 from torch.utils.data.dataloader import DataLoader
 from transformers import XLMRobertaConfig, XLMRobertaModel, XLMRobertaTokenizer
 
+import time
 
 MODEL_CLASSES = {
     "xlmr": (XLMRobertaConfig, XLMRobertaModel, XLMRobertaTokenizer),
@@ -298,6 +299,23 @@ def get_wa(args, model, sample):
   return ret_wa
 
 
+def write_alignments(args, final_result_wa, src_lang, trg_lang):
+  if len(args.output_folder) == 0:
+    return
+  
+#  outfilename = os.path.join(args.output_folder, args.input_stem + "-" + src_lang + "-" + trg_lang + ".align")
+  outfilename = os.path.join(args.output_folder, args.input_stem + ".align")
+
+  with open(outfilename, 'w') as f:
+    for sent_aligns in final_result_wa:
+      for align in sent_aligns:
+        f.write(str(align[0]))
+        f.write('-')
+        f.write(str(align[1]))
+        f.write(' ')
+      f.write('\n')
+
+
 def run(args):
   args.tokens_per_sample = 512
   vocab = Dictionary.load(args.vocab_path)
@@ -309,31 +327,46 @@ def run(args):
   for lang_pair in args.lang_pairs.split(","):
 
     src_lang, trg_lang = lang_pair.split("-")
-    test_set_dir = os.path.join(args.test_set_dir, lang_pair)
-    args.src_fn = os.path.join(test_set_dir, "test.%s" % src_lang)
-    args.trg_fn = os.path.join(test_set_dir, "test.%s" % trg_lang)
-    args.gold_align = os.path.join(test_set_dir, "alignv2.txt")
-    gold_align = load_gold_alignments(args)
+    if args.input_folder_is_flat:
+      test_set_dir = args.test_set_dir
+    else:
+      test_set_dir = os.path.join(args.test_set_dir, lang_pair)
+    fname_pattern = args.input_stem + ".%s"
+    args.src_fn = os.path.join(test_set_dir, fname_pattern % src_lang)
+    args.trg_fn = os.path.join(test_set_dir, fname_pattern % trg_lang)
+    if not args.align_only:
+      args.gold_align = os.path.join(test_set_dir, "alignv2.txt")
+      gold_align = load_gold_alignments(args)    
     dataset = get_dataset(args, vocab)
     dl = DataLoader(dataset, batch_size=64, shuffle=False, collate_fn=dataset.collater)
 
     print("Language pair: %s" % lang_pair)
     all_results = {key:[] for key in ["p", "r", "f1", "aer"]}
+    final_result_wa = []
+    start_time = time.time()
     for wa_layer in range(13):
       args.wa_layer = wa_layer
+      print(str(wa_layer))
       result_wa = []
       for sample in dl:
         sample = move_to_device(sample, args.device)
         batch_wa = get_wa(args, model, sample)
         # batch_wa = get_wa_v2(args, model, sample)
         result_wa.extend(batch_wa)
-      p, r, f1, aer = eval_results(gold_align, result_wa)
-      all_results["p"].append(p)
-      all_results["r"].append(r)
-      all_results["f1"].append(f1)
-      all_results["aer"].append(aer)
-    for key, value in all_results.items():
-      print("%s: %s" % (key, ", ".join(["%.2f" % i for i in value])))
+      final_result_wa = result_wa        
+      if not args.align_only:
+        p, r, f1, aer = eval_results(gold_align, result_wa)
+        all_results["p"].append(p)
+        all_results["r"].append(r)
+        all_results["f1"].append(f1)
+        all_results["aer"].append(aer)
+    if not args.align_only:
+      for key, value in all_results.items():
+        print("%s: %s" % (key, ", ".join(["%.2f" % i for i in value])))
+    
+    end_time = time.time()
+    print(end_time - start_time)
+    write_alignments(args, final_result_wa, src_lang, trg_lang)
   
 
 if __name__ == "__main__":
@@ -364,6 +397,26 @@ if __name__ == "__main__":
                       help="Path to pre-trained model or shortcut name selected in the list:")
   parser.add_argument("--do_lower_case", action='store_true',
                       help="Set this flag if you are using an uncased model.")
+  parser.add_argument("--align_only", action='store_true',
+                      help="Set this flag to perform alignment without scoring and save results.")
+  parser.add_argument(
+    "--output_folder",
+    default="",
+    type=str,
+    help="Folder for output files",
+  )
+  parser.add_argument(
+    "--input_folder_is_flat",
+    action='store_true',
+    help="If true, input files are all in same folder, not in per-language-pair subfolders",
+  )
+  parser.add_argument(
+    "--input_stem",
+    default="test",
+    type=str,
+    help="Filename stem for input files, e.g. 'test' for file pair test.de, test.en",
+  )
+  
   args = parser.parse_args()
   args.device = torch.device("cuda")
   run(args)
