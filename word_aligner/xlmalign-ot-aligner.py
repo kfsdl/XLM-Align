@@ -323,6 +323,7 @@ def run(args):
   config, tokenizer, model = load_model(args)
   if args.device == torch.device("cuda"):
     model.cuda()
+    model.cuda().half()
 
   for lang_pair in args.lang_pairs.split(","):
 
@@ -348,7 +349,10 @@ def run(args):
       args.wa_layer = wa_layer
       print(str(wa_layer))
       result_wa = []
+      sample_num = 1
       for sample in dl:
+        print('sample' + str(sample_num))
+        sample_num = sample_num + 1
         sample = move_to_device(sample, args.device)
         batch_wa = get_wa(args, model, sample)
         # batch_wa = get_wa_v2(args, model, sample)
