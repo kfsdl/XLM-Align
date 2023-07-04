@@ -345,7 +345,9 @@ def run(args):
     all_results = {key:[] for key in ["p", "r", "f1", "aer"]}
     final_result_wa = []
     start_time = time.time()
-    for wa_layer in range(13):
+    wa_layer = 12
+    #for wa_layer in range(13):
+    if True:
       args.wa_layer = wa_layer
       print(str(wa_layer))
       result_wa = []
